@@ -1,0 +1,20 @@
+[package]
+name = "margin-balance-optimizer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.23", features = ["native-tls"] }
+futures-util = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dotenv = "0.15"
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+anyhow = "1.0"
+crossterm = "0.27"
+ratatui = "0.28"
+chrono = "0.4"

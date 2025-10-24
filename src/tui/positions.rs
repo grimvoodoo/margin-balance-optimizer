@@ -1,0 +1,224 @@
+use anyhow::Result;
+use ratatui::{
+    backend::Backend,
+    layout::{Alignment, Constraint, Direction, Layout},
+    style::{Color, Modifier, Style},
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table},
+    Terminal,
+};
+use std::collections::HashMap;
+
+use crate::models::{Position, TickerData};
+use crate::tui::render_balance;
+
+pub fn render_positions<B: Backend>(
+    terminal: &mut Terminal<B>,
+    positions: &HashMap<String, Position>,
+    ticker_data: &HashMap<String, TickerData>,
+    balances: &HashMap<String, String>,
+    asset_pair_map: &HashMap<String, String>,
+    price_changes_24h: &HashMap<String, f64>,
+    display_currency: &str,
+    show_help: bool,
+    is_loading: bool,
+    loading_message: &str,
+    selected_index: usize,
+) -> Result<()> {
+    terminal.draw(|f| {
+        let size = f.area();
+
+        // Split the screen into three sections: positions, balance, status bar
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(58), // Positions table
+                Constraint::Percentage(39), // Balance table
+                Constraint::Length(3),      // Status bar
+            ])
+            .split(size);
+
+        // Sort positions by UP&L (highest to lowest)
+        let mut sorted_positions: Vec<_> = positions.iter().collect();
+        sorted_positions.sort_by(|a, b| {
+            let upnl_a = a.1.calculate_unrealized_pnl();
+            let upnl_b = b.1.calculate_unrealized_pnl();
+            upnl_b.partial_cmp(&upnl_a).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let rows: Vec<Row> = sorted_positions
+            .iter()
+            .enumerate()
+            .map(|(index, (_pos_id, position))| {
+                let pair = &position.pair;
+                let side = &position.position_type;
+                let volume: f64 = position.vol.parse().unwrap_or(0.0);
+                let cost: f64 = position.cost.parse().unwrap_or(0.0);
+                let margin: f64 = position.margin.parse().unwrap_or(0.0);
+                let open_price = if volume != 0.0 { cost / volume } else { 0.0 };
+
+                let current_price = ticker_data
+                    .get(pair)
+                    .and_then(|t| t.c.first())
+                    .and_then(|p| p.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+
+                let upnl = position.calculate_unrealized_pnl();
+
+                let side_text = if side.to_lowercase() == "buy" { "Long" } else { "Short" };
+                let side_color = if side.to_lowercase() == "buy" { Color::Green } else { Color::Red };
+                let upnl_color = if upnl > 0.0 { Color::Green } else if upnl < 0.0 { Color::Red } else { Color::White };
+
+                let is_selected = index == selected_index;
+
+                if is_selected {
+                    // Selected row: white background, black text
+                    Row::new(vec![
+                        Cell::from(format!("{}", pair)),
+                        Cell::from(format!("{}", side_text)),
+                        Cell::from(format!("{:.8}", volume)),
+                        Cell::from(format!("{:.2}", open_price)),
+                        Cell::from(format!("{:.2}", current_price)),
+                        Cell::from(format!("{:.2}", margin)),
+                        Cell::from(format!("{:+.2}", upnl)),
+                    ])
+                    .style(Style::default().bg(Color::White).fg(Color::Black).add_modifier(Modifier::BOLD))
+                } else {
+                    // Non-selected row: colored cells
+                    Row::new(vec![
+                        Cell::from(format!("{}", pair)).style(Style::default().fg(Color::Cyan)),
+                        Cell::from(format!("{}", side_text)).style(Style::default().fg(side_color)),
+                        Cell::from(format!("{:.8}", volume)),
+                        Cell::from(format!("{:.2}", open_price)),
+                        Cell::from(format!("{:.2}", current_price)),
+                        Cell::from(format!("{:.2}", margin)),
+                        Cell::from(format!("{:+.2}", upnl)).style(Style::default().fg(upnl_color).add_modifier(Modifier::BOLD)),
+                    ])
+                }
+            })
+            .collect();
+
+        let widths = [
+            Constraint::Length(15),
+            Constraint::Length(6),
+            Constraint::Length(14),
+            Constraint::Length(14),
+            Constraint::Length(14),
+            Constraint::Length(14),
+            Constraint::Length(16),
+        ];
+
+        let table = Table::new(rows, widths)
+            .header(
+                Row::new(vec!["PAIR", "SIDE", "OPEN QTY", "OPEN PRICE", "CURRENT", "MARGIN", "UP&L"])
+                    .style(Style::default().add_modifier(Modifier::BOLD))
+                    .bottom_margin(1),
+            )
+            .block(
+                Block::default()
+                    .title("KRAKEN POSITIONS MONITOR")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Cyan)),
+            )
+            .highlight_style(Style::default().bg(Color::White).fg(Color::Black).add_modifier(Modifier::BOLD));
+
+        f.render_widget(table, chunks[0]);
+
+        // Render balance table
+        render_balance(f, chunks[1], balances, ticker_data, asset_pair_map, price_changes_24h, display_currency);
+        
+        // Render status bar
+        let status_text = format!(" [H]elp  [C] Balance Currency: {}  [Q]uit ", display_currency);
+        let status_bar = Paragraph::new(status_text)
+            .style(Style::default().bg(Color::DarkGray).fg(Color::White))
+            .block(Block::default().borders(Borders::NONE));
+        f.render_widget(status_bar, chunks[2]);
+        
+        // Render loading overlay if still loading
+        if is_loading {
+            let loading_block = Block::default()
+                .title(" Loading ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Yellow));
+            
+            // Simple spinner animation based on time
+            let spinner_frames = vec!["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let frame_idx = (std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() / 100) as usize % spinner_frames.len();
+            let spinner = spinner_frames[frame_idx];
+            
+            let loading_text = format!(
+                "\n\n    {}  {}\n\n    Please wait...",
+                spinner, loading_message
+            );
+            
+            let loading_paragraph = Paragraph::new(loading_text)
+                .block(loading_block)
+                .style(Style::default().fg(Color::White))
+                .alignment(Alignment::Left);
+            
+            let area = centered_rect(50, 30, size);
+            f.render_widget(Clear, area);
+            f.render_widget(loading_paragraph, area);
+        }
+        // Render help modal if requested
+        else if show_help {
+            let help_block = Block::default()
+                .title(" Help ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan));
+            
+            let help_text = vec![
+                "Keyboard Shortcuts:",
+                "",
+                "  ↑/↓      Navigate positions",
+                "  H        Toggle this help",
+                "  C        Cycle balance display currency (GBP → USD → EUR)",
+                "  Q        Quit",
+                "  ESC      Close this help",
+                "",
+                "Currency Display:",
+                "• Balance values shown in selected currency",
+                "• Positions show native trading pair prices",
+                "• All 24H changes calculated vs USD",
+                "",
+                "Press ESC or H to close",
+            ];
+            
+            let help_content = help_text.join("\n");
+            let help_paragraph = Paragraph::new(help_content)
+                .block(help_block)
+                .style(Style::default().fg(Color::White))
+                .alignment(Alignment::Left);
+            
+            // Center the help modal
+            let area = centered_rect(60, 50, size);
+            f.render_widget(Clear, area); // Clear background
+            f.render_widget(help_paragraph, area);
+        }
+    })?;
+
+    Ok(())
+}
+
+/// Helper function to create a centered rectangle
+fn centered_rect(percent_x: u16, percent_y: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
+}
