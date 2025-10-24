@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use base64::{engine::general_purpose, Engine};
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256, Sha512};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::models::{
@@ -34,11 +35,24 @@ impl KrakenClient {
     }
 
     fn get_nonce(&self) -> String {
-        let nonce = SystemTime::now()
+        // Use microseconds and atomic monotonic fallback to prevent nonce collisions
+        // under concurrent API calls
+        static LAST_NONCE: AtomicU64 = AtomicU64::new(0);
+
+        let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_millis();
-        nonce.to_string()
+            .as_micros() as u64;
+
+        let mut prev = LAST_NONCE.load(Ordering::Relaxed);
+        loop {
+            // Ensure strictly monotonic: use timestamp if newer, otherwise increment
+            let candidate = if now > prev { now } else { prev + 1 };
+            match LAST_NONCE.compare_exchange(prev, candidate, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => return candidate.to_string(),
+                Err(p) => prev = p,
+            }
+        }
     }
 
     fn sign_request(&self, urlpath: &str, nonce: &str, postdata: &str) -> String {
@@ -65,14 +79,14 @@ impl KrakenClient {
         params: &HashMap<String, String>,
     ) -> Result<T> {
         let nonce = self.get_nonce();
-        let mut all_params = params.clone();
+
+        // Use BTreeMap for deterministic ordering and proper URL encoding
+        let mut all_params = BTreeMap::new();
+        all_params.extend(params.iter().map(|(k, v)| (k.clone(), v.clone())));
         all_params.insert("nonce".to_string(), nonce.clone());
 
-        let postdata = all_params
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join("&");
+        let postdata =
+            serde_urlencoded::to_string(&all_params).expect("Failed to form-encode params");
 
         let urlpath = format!("/0/private/{}", endpoint);
         let signature = self.sign_request(&urlpath, &nonce, &postdata);
