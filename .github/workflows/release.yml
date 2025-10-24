@@ -1,0 +1,153 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allow manual triggering
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  create-tag:
+    name: Create Semantic Version Tag
+    runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.tag.outputs.new_tag }}
+      changelog: ${{ steps.tag.outputs.changelog }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+      - name: Bump version and push tag
+        id: tag
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+          release_branches: main
+          tag_prefix: v
+
+  build-artifacts:
+    name: Build Release Artifacts
+    runs-on: ubuntu-latest
+    needs: create-tag
+    if: needs.create-tag.outputs.new_tag
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo target
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-target-
+
+      - name: Install musl tools (for musl target)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Create archive
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../margin-balance-optimizer-${{ needs.create-tag.outputs.new_tag }}-${{ matrix.target }}.tar.gz margin-balance-optimizer
+          cd -
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: margin-balance-optimizer-${{ matrix.target }}
+          path: margin-balance-optimizer-${{ needs.create-tag.outputs.new_tag }}-${{ matrix.target }}.tar.gz
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [create-tag, build-artifacts]
+    if: needs.create-tag.outputs.new_tag
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ needs.create-tag.outputs.new_tag }}
+          name: Release ${{ needs.create-tag.outputs.new_tag }}
+          body: |
+            ## 🚀 What's Changed
+            ${{ needs.create-tag.outputs.changelog }}
+            
+            ## 📦 Binaries
+            Pre-built binaries are available for the following platforms:
+            - Linux x86_64 (GNU libc)
+            - Linux x86_64 (musl - statically linked)
+            
+            ## 🛠️ Installation
+            ```bash
+            # Download and extract the binary for your platform
+            wget https://github.com/${{ github.repository }}/releases/download/${{ needs.create-tag.outputs.new_tag }}/margin-balance-optimizer-${{ needs.create-tag.outputs.new_tag }}-x86_64-unknown-linux-gnu.tar.gz
+            tar xzf margin-balance-optimizer-${{ needs.create-tag.outputs.new_tag }}-x86_64-unknown-linux-gnu.tar.gz
+            
+            # Make it executable and run
+            chmod +x margin-balance-optimizer
+            ./margin-balance-optimizer
+            ```
+            
+            ## 📝 Building from Source
+            ```bash
+            # Clone the repository at this tag
+            git clone --branch ${{ needs.create-tag.outputs.new_tag }} https://github.com/${{ github.repository }}.git
+            cd margin-balance-optimizer
+            
+            # Build with cargo
+            cargo build --release
+            
+            # The binary will be in target/release/margin-balance-optimizer
+            ```
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/**/*.tar.gz
