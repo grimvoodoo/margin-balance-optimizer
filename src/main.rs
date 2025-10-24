@@ -1,3 +1,4 @@
+mod constants;
 mod kraken;
 mod models;
 mod tui;
@@ -15,6 +16,7 @@ use std::io;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use constants::POSITION_UPDATE_INTERVAL_SECS;
 use kraken::KrakenClient;
 use tui::{render_positions, RenderConfig};
 
@@ -172,7 +174,7 @@ async fn main() -> Result<()> {
     let client_clone = client.clone();
     let last_asset_pairs_fetch_clone = Arc::clone(&last_asset_pairs_fetch);
 
-    // Spawn fast position update loop (every 6 seconds)
+    // Spawn fast position update loop (every POSITION_UPDATE_INTERVAL_SECS seconds)
     let positions_fast_clone = Arc::clone(&positions_data);
     let should_quit_fast = Arc::clone(&should_quit);
     let should_redraw_fast = Arc::clone(&should_redraw);
@@ -250,8 +252,11 @@ async fn main() -> Result<()> {
                 }
             }
 
-            // Update every 6 seconds
-            tokio::time::sleep(tokio::time::Duration::from_secs(6)).await;
+            // Update every POSITION_UPDATE_INTERVAL_SECS seconds
+            tokio::time::sleep(tokio::time::Duration::from_secs(
+                POSITION_UPDATE_INTERVAL_SECS as u64,
+            ))
+            .await;
         }
     });
 

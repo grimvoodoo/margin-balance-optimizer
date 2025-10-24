@@ -8,6 +8,7 @@ use ratatui::{
 };
 use std::collections::HashMap;
 
+use crate::constants::POSITION_UPDATE_INTERVAL_SECS;
 use crate::models::{Position, TickerData};
 use crate::tui::render_balance;
 
@@ -177,8 +178,7 @@ pub fn render_positions<B: Backend>(
         );
 
         // Render status bar with subtle progress indicator
-        let update_interval = 6.0; // 6 seconds between updates
-        let progress = (config.seconds_since_update / update_interval).min(1.0);
+        let progress = (config.seconds_since_update / POSITION_UPDATE_INTERVAL_SECS).min(1.0);
 
         // Create two chunks: one for progress bar, one for status text
         let status_chunks = Layout::default()
