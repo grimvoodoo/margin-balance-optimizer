@@ -203,52 +203,13 @@ async fn main() -> Result<()> {
             // Reset update time at start of cycle
             *last_update_fast.lock().unwrap() = std::time::Instant::now();
 
-            // Debug: Log position fetch
-            use std::io::Write;
-            if let Ok(mut file) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/tmp/kraken_position_fetch.txt")
-            {
-                let _ = writeln!(
-                    file,
-                    "[{}] Fetching positions...",
-                    chrono::Utc::now().format("%H:%M:%S%.3f")
-                );
-            }
-
             match client_fast.get_open_positions().await {
                 Ok(positions) => {
-                    // Debug: Log position received
-                    if let Ok(mut file) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open("/tmp/kraken_position_fetch.txt")
-                    {
-                        let _ = writeln!(
-                            file,
-                            "[{}] Received {} positions",
-                            chrono::Utc::now().format("%H:%M:%S%.3f"),
-                            positions.len()
-                        );
-                    }
                     *positions_fast_clone.lock().unwrap() = positions;
                     first_run = false;
                 }
-                Err(e) => {
+                Err(_e) => {
                     first_run = false;
-                    if let Ok(mut file) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open("/tmp/kraken_position_fetch.txt")
-                    {
-                        let _ = writeln!(
-                            file,
-                            "[{}] ERROR: {:?}",
-                            chrono::Utc::now().format("%H:%M:%S%.3f"),
-                            e
-                        );
-                    }
                 }
             }
 
@@ -277,50 +238,11 @@ async fn main() -> Result<()> {
                 *should_redraw_clone.lock().unwrap() = true;
             }
 
-            // Debug: Log balance fetch
-            if let Ok(mut file) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/tmp/kraken_balance_fetch.txt")
-            {
-                let _ = writeln!(
-                    file,
-                    "[{}] Fetching balances...",
-                    chrono::Utc::now().format("%H:%M:%S%.3f")
-                );
-            }
-
             match client_clone.get_balance().await {
                 Ok(balances) => {
-                    // Debug: Log balance received
-                    if let Ok(mut file) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open("/tmp/kraken_balance_fetch.txt")
-                    {
-                        let _ = writeln!(
-                            file,
-                            "[{}] Received {} balances",
-                            chrono::Utc::now().format("%H:%M:%S%.3f"),
-                            balances.len()
-                        );
-                    }
                     *balance_data_clone.lock().unwrap() = balances;
                 }
-                Err(e) => {
-                    if let Ok(mut file) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open("/tmp/kraken_balance_fetch.txt")
-                    {
-                        let _ = writeln!(
-                            file,
-                            "[{}] ERROR: {:?}",
-                            chrono::Utc::now().format("%H:%M:%S%.3f"),
-                            e
-                        );
-                    }
-                }
+                Err(_e) => {}
             }
 
             // Collect all pairs needed for ticker data (from positions and balances)
@@ -351,19 +273,6 @@ async fn main() -> Result<()> {
                 .cloned()
                 .collect();
 
-            // Debug logging - import Write once for this block
-            use std::io::Write;
-            if let Ok(mut file) = std::fs::File::create("/tmp/kraken_discovery_start.txt") {
-                let _ = writeln!(
-                    file,
-                    "Starting pair discovery for {} assets",
-                    balance_assets.len()
-                );
-                for asset in &balance_assets {
-                    let _ = writeln!(file, "  - {}", asset);
-                }
-            }
-
             // Dynamically find valid pairs for our assets (cached - only fetch every hour)
             let should_fetch_pairs = {
                 let last_fetch = last_asset_pairs_fetch_clone.lock().unwrap();
@@ -390,25 +299,6 @@ async fn main() -> Result<()> {
                         // Store the mapping for use in rendering
                         *asset_pair_map_clone.lock().unwrap() = asset_pairs.clone();
 
-                        // Debug: Log the asset-to-pair mappings
-                        if let Ok(mut file) =
-                            std::fs::File::create("/tmp/kraken_asset_mappings.txt")
-                        {
-                            let _ = writeln!(file, "=== Asset to Pair Mappings ===");
-                            let _ = writeln!(file, "Total mappings: {}\n", asset_pairs.len());
-                            let mut sorted: Vec<_> = asset_pairs.iter().collect();
-                            sorted.sort_by_key(|(k, _)| k.as_str());
-                            for (asset, pair) in sorted {
-                                let _ = writeln!(file, "  {} -> {}", asset, pair);
-                            }
-                            let _ = writeln!(file, "\n=== Unmapped Assets ===");
-                            for asset in &balance_assets {
-                                if !asset_pairs.contains_key(asset) {
-                                    let _ = writeln!(file, "  {}", asset);
-                                }
-                            }
-                        }
-
                         for pair_name in asset_pairs.values() {
                             pairs.insert(pair_name.clone());
                         }
@@ -427,13 +317,7 @@ async fn main() -> Result<()> {
                         }
                         drop(curr); // Release lock
                     }
-                    Err(e) => {
-                        if let Ok(mut file) =
-                            std::fs::File::create("/tmp/kraken_pair_discovery_error.txt")
-                        {
-                            let _ = writeln!(file, "Error discovering pairs: {:?}", e);
-                        }
-                    }
+                    Err(_e) => {}
                 }
             } else if !balance_assets.is_empty() {
                 // Use cached asset pair mappings
@@ -456,23 +340,6 @@ async fn main() -> Result<()> {
             }
 
             let pairs_vec: Vec<String> = pairs.into_iter().collect();
-
-            // Debug: Write requested pairs BEFORE API call
-            if let Ok(mut file) = std::fs::File::create("/tmp/kraken_pairs_requested.txt") {
-                let _ = writeln!(
-                    file,
-                    "=== Pairs we're requesting ({} total) ===",
-                    pairs_vec.len()
-                );
-                for (i, pair) in pairs_vec.iter().enumerate() {
-                    let _ = writeln!(file, "  {}: {}", i, pair);
-                }
-                let _ = writeln!(file, "\n=== Balance Assets ===");
-                let balances = balance_data_clone.lock().unwrap();
-                for (asset, bal) in balances.iter() {
-                    let _ = writeln!(file, "  {} = {}", asset, bal);
-                }
-            }
 
             // Fetch tickers in batches to reduce API calls (25 calls -> 3 calls)
             if is_loading {
@@ -508,37 +375,6 @@ async fn main() -> Result<()> {
                     }
                 }
 
-                // Debug: Write results
-                if let Ok(mut file) = std::fs::File::create("/tmp/kraken_debug.txt") {
-                    let _ = writeln!(file, "Pairs requested: {}", pairs_vec.len());
-                    let _ = writeln!(file, "Successful: {}", successful_pairs.len());
-                    let _ = writeln!(file, "Failed: {}\n", failed_pairs.len());
-
-                    if !successful_pairs.is_empty() {
-                        let _ = writeln!(file, "=== Successful Pairs ===");
-                        for (i, pair) in successful_pairs.iter().enumerate() {
-                            let _ = writeln!(file, "  {}: {}", i, pair);
-                        }
-                    }
-
-                    if !failed_pairs.is_empty() {
-                        let _ = writeln!(file, "\n=== Failed Pairs ===");
-                        for (pair, error) in &failed_pairs {
-                            let _ = writeln!(file, "  {}: {}", pair, error);
-                        }
-                    }
-
-                    let _ = writeln!(file, "\n=== Received Ticker Data ===");
-                    let mut received: Vec<_> = all_tickers.keys().collect();
-                    received.sort();
-                    for (i, pair) in received.iter().enumerate() {
-                        if let Some(ticker) = all_tickers.get(*pair) {
-                            let price = ticker.c.first().map(|s| s.as_str()).unwrap_or("0");
-                            let _ = writeln!(file, "  {}: {} = £{}", i, pair, price);
-                        }
-                    }
-                }
-
                 *ticker_data_clone.lock().unwrap() = all_tickers;
             }
 
@@ -548,7 +384,6 @@ async fn main() -> Result<()> {
                 *should_redraw_clone.lock().unwrap() = true;
             }
             let mut changes_24h = HashMap::new();
-            let mut ohlc_debug = Vec::new();
 
             for (idx, pair) in pairs_vec.iter().enumerate() {
                 // Respect Kraken's 1 req/s limit across all API endpoints
@@ -566,12 +401,6 @@ async fn main() -> Result<()> {
                                 for (key, value) in obj {
                                     if key != "last" {
                                         if let Some(candles) = value.as_array() {
-                                            ohlc_debug.push(format!(
-                                                "  {}: {} candles",
-                                                pair,
-                                                candles.len()
-                                            ));
-
                                             if candles.len() >= 2 {
                                                 // Each candle is [time, open, high, low, close, vwap, volume, count]
                                                 let yesterday = &candles[candles.len() - 2];
@@ -606,7 +435,6 @@ async fn main() -> Result<()> {
                                                                         pair.clone(),
                                                                         change_pct,
                                                                     );
-                                                                    ohlc_debug.push(format!("    Change: {:.2}% (prev: {:.2}, curr: {:.2})", change_pct, prev_close, curr_close));
                                                                 }
                                                             }
                                                         }
@@ -620,29 +448,7 @@ async fn main() -> Result<()> {
                             }
                         }
                     }
-                    Err(e) => {
-                        ohlc_debug.push(format!("  {}: ERROR - {:?}", pair, e));
-                    }
-                }
-            }
-
-            // Debug: Write OHLC fetch results
-            if let Ok(mut file) = std::fs::File::create("/tmp/kraken_ohlc_debug.txt") {
-                let _ = writeln!(file, "=== OHLC Data Fetch Results ===");
-                let _ = writeln!(file, "Total pairs attempted: {}", pairs_vec.len());
-                let _ = writeln!(
-                    file,
-                    "Successful changes calculated: {}\n",
-                    changes_24h.len()
-                );
-                for line in &ohlc_debug {
-                    let _ = writeln!(file, "{}", line);
-                }
-                let _ = writeln!(file, "\n=== Calculated Changes ===");
-                let mut sorted_changes: Vec<_> = changes_24h.iter().collect();
-                sorted_changes.sort_by_key(|(k, _)| k.as_str());
-                for (pair, change) in sorted_changes {
-                    let _ = writeln!(file, "  {}: {:+.2}%", pair, change);
+                    Err(_e) => {}
                 }
             }
 
