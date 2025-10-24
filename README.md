@@ -133,21 +133,36 @@ cargo test mock_api_tests
 
 ## API Usage & Rate Limits
 
-The application is optimized to stay well within Kraken's API rate limits:
+The application is optimized to stay within Kraken's API rate limits.
+
+### Kraken Rate Limit Policy
+
+Kraken enforces a **maximum of 1 request per second** across all API endpoints. Rate limits are tracked using two separate counters:
+
+- **Matching Engine Counter**: Incremented by private order/trade operations
+- **REST API Counter**: Incremented by all other REST API calls
+
+Each successful request decrements the counter; exceeding the limit results in temporary rate limiting.
+
+**Reference**: [Kraken API Rate Limits](https://support.kraken.com/articles/206548367-what-are-the-api-rate-limits-)
 
 ### Update Frequencies
 
 - **Positions**: Every 6 seconds (fast tracking of P&L changes)
 - **Balances**: Every 30 seconds
-- **Ticker Prices**: Real-time via WebSocket
+- **Ticker Prices**: Real-time via WebSocket (no REST limit impact)
 - **24h Price Changes**: Every 30 seconds
 - **Asset Pair Discovery**: Cached for 1 hour
 
 ### Rate Limit Safety
 
-- **Private API**: ~12 calls/minute (60% of limit)
-- **Public API**: ~18 calls/minute (90% of limit)
+The application maintains a conservative request rate:
+
+- **Maximum**: ~0.5 requests/second average (well under 1 req/s limit)
+- **Positions API**: 1 call every 6 seconds (0.17 req/s)
+- **Balances API**: 1 call every 30 seconds (0.03 req/s)
 - **Ticker calls**: Batched in groups of 10 to minimize API usage
+- **WebSocket**: Real-time ticker updates bypass REST API limits entirely
 
 ## Architecture
 
@@ -174,11 +189,14 @@ cargo build
 
 ### Rate Limit Errors
 
-If you encounter rate limit errors:
+If you encounter rate limit errors (HTTP 429):
 
-1. Increase the position update interval to 10 seconds
-2. Increase the main loop interval to 45-60 seconds
-3. Cache OHLC data for longer (1-2 minutes)
+1. Ensure you're not running multiple instances of the application
+2. Check that no other applications are using your Kraken API keys
+3. Increase the position update interval in `src/main.rs` (default: 6 seconds)
+4. The application is already configured to stay well under the 1 req/s limit
+
+**Note**: Rate limits reset gradually, so wait 5-10 seconds before retrying.
 
 ### WebSocket Connection Issues
 

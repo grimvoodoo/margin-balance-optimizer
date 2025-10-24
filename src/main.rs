@@ -483,9 +483,9 @@ async fn main() -> Result<()> {
                 // Batch in groups of 10 pairs per API call
                 let batch_size = 10;
                 for (batch_idx, chunk) in pairs_vec.chunks(batch_size).enumerate() {
-                    // Delay between batches to avoid rate limiting
+                    // Delay between batches to respect Kraken's 1 req/s limit
                     if batch_idx > 0 {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                     }
 
                     match client_clone.get_ticker(chunk.to_vec()).await {
@@ -546,10 +546,10 @@ async fn main() -> Result<()> {
             let mut ohlc_debug = Vec::new();
 
             for (idx, pair) in pairs_vec.iter().enumerate() {
-                // Add delay between requests to avoid rate limiting
-                // Kraken public API limit is ~1 call per second burst, so space them out
+                // Respect Kraken's 1 req/s limit across all API endpoints
+                // See: https://support.kraken.com/articles/206548367-what-are-the-api-rate-limits-
                 if idx > 0 {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 }
 
                 match client_clone.get_ohlc(pair, Some(1440)).await {
