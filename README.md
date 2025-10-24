@@ -5,7 +5,7 @@ A Rust-based terminal UI application for monitoring Kraken cryptocurrency tradin
 ## Features
 
 - **Real-time Position Tracking**: Monitor open positions with P&L updates every 6 seconds
-- **WebSocket Integration**: Live ticker price updates via Kraken WebSocket API
+- **Live Market Data**: Ticker price updates with intelligent batching to minimize API calls
 - **Multi-Currency Support**: View balances in GBP, USD, or EUR (toggle with `C` key)
 - **Terminal UI**: Clean, responsive interface built with Ratatui
 - **Rate Limit Optimized**: Intelligent API call batching and caching to stay within Kraken's limits
@@ -63,10 +63,8 @@ cargo run --release
 ```
 margin-balance-optimizer/
 ├── src/
-│   ├── main.rs              # Main application (WebSocket)
-│   ├── main_rest_api.rs     # REST API fallback
+│   ├── main.rs              # Main application
 │   ├── models.rs            # Data structures
-│   ├── helpers.rs           # Utility functions
 │   ├── kraken/              # API client modules
 │   └── tui/                 # Terminal UI rendering
 ├── tests/
@@ -150,7 +148,7 @@ Each successful request decrements the counter; exceeding the limit results in t
 
 - **Positions**: Every 6 seconds (fast tracking of P&L changes)
 - **Balances**: Every 30 seconds
-- **Ticker Prices**: Real-time via WebSocket (no REST limit impact)
+- **Ticker Prices**: Batched updates every 30 seconds
 - **24h Price Changes**: Every 30 seconds
 - **Asset Pair Discovery**: Cached for 1 hour
 
@@ -162,33 +160,15 @@ The application maintains a conservative request rate:
 - **Positions API**: 1 call every 6 seconds (0.17 req/s)
 - **Balances API**: 1 call every 30 seconds (0.03 req/s)
 - **Ticker calls**: Batched in groups of 10 to minimize API usage
-- **WebSocket**: Real-time ticker updates bypass REST API limits entirely
 
 ## Architecture
 
-### WebSocket Integration
+The application uses Kraken's REST API with intelligent batching and caching:
 
-The application uses Kraken's WebSocket v2 API for real-time ticker updates:
-
-- **Endpoint**: `wss://ws.kraken.com/v2`
-- **Channel**: `ticker` for price updates
-- **Benefits**: Real-time updates, reduced API calls, lower latency (~100-200ms vs 30s)
-
-### REST API Fallback
-
-The project provides two separate binaries for WebSocket and REST API modes:
-
-```bash
-# Run WebSocket version (default, recommended)
-cargo run --release --bin mbo-ws
-
-# Run REST API version (fallback)
-cargo run --release --bin mbo-rest
-
-# Build both binaries
-cargo build --release
-# Binaries will be in target/release/mbo-ws and target/release/mbo-rest
-```
+- **Batch Processing**: Groups multiple ticker requests into single API calls
+- **Smart Caching**: Asset pair discovery cached for 1 hour
+- **Optimized Polling**: Different update intervals for different data types
+- **Rate Limit Aware**: Built-in delays and request management to stay within limits
 
 ## Troubleshooting
 
@@ -202,14 +182,6 @@ If you encounter rate limit errors (HTTP 429):
 4. The application is already configured to stay well under the 1 req/s limit
 
 **Note**: Rate limits reset gradually, so wait 5-10 seconds before retrying.
-
-### WebSocket Connection Issues
-
-Check the logs for connection status:
-```bash
-cat /tmp/kraken_ws_messages.txt   # Raw WebSocket messages
-cat /tmp/kraken_ws_tickers.txt    # Parsed ticker updates
-```
 
 ### Asset Pair Mapping
 
@@ -291,4 +263,3 @@ The `.gitignore` file is configured to exclude:
 
 For issues or questions about Kraken's API:
 - [Kraken API Documentation](https://docs.kraken.com/rest/)
-- [Kraken WebSocket Documentation](https://docs.kraken.com/websockets-v2/)

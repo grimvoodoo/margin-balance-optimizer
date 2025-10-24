@@ -87,7 +87,6 @@ pub struct AssetPairInfo {
 #[allow(dead_code)]
 pub struct AssetPair {
     pub altname: String,
-    pub wsname: String,
     pub base: String,
     pub quote: String,
 }
