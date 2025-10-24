@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use crate::models::{Position, TickerData};
 use crate::tui::render_balance;
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_positions<B: Backend>(
     terminal: &mut Terminal<B>,
     positions: &HashMap<String, Position>,
@@ -90,8 +91,8 @@ pub fn render_positions<B: Backend>(
                 if is_selected {
                     // Selected row: white background, black text
                     Row::new(vec![
-                        Cell::from(format!("{}", pair)),
-                        Cell::from(format!("{}", side_text)),
+                        Cell::from(pair.to_string()),
+                        Cell::from(side_text.to_string()),
                         Cell::from(format!("{:.8}", volume)),
                         Cell::from(format!("{:.2}", open_price)),
                         Cell::from(format!("{:.2}", current_price)),
@@ -107,8 +108,8 @@ pub fn render_positions<B: Backend>(
                 } else {
                     // Non-selected row: colored cells
                     Row::new(vec![
-                        Cell::from(format!("{}", pair)).style(Style::default().fg(Color::Cyan)),
-                        Cell::from(format!("{}", side_text)).style(Style::default().fg(side_color)),
+                        Cell::from(pair.to_string()).style(Style::default().fg(Color::Cyan)),
+                        Cell::from(side_text.to_string()).style(Style::default().fg(side_color)),
                         Cell::from(format!("{:.8}", volume)),
                         Cell::from(format!("{:.2}", open_price)),
                         Cell::from(format!("{:.2}", current_price)),
@@ -173,7 +174,6 @@ pub fn render_positions<B: Backend>(
         // Render status bar with subtle progress indicator
         let update_interval = 6.0; // 6 seconds between updates
         let progress = (seconds_since_update / update_interval).min(1.0);
-        let bar_width = (size.width as f64 * progress) as u16;
 
         // Create two chunks: one for progress bar, one for status text
         let status_chunks = Layout::default()
@@ -223,7 +223,7 @@ pub fn render_positions<B: Backend>(
                 .border_style(Style::default().fg(Color::Yellow));
 
             // Simple spinner animation based on time
-            let spinner_frames = vec!["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
             let frame_idx = (std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

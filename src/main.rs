@@ -1,4 +1,3 @@
-mod helpers;
 mod kraken;
 mod models;
 mod tui;
@@ -57,12 +56,9 @@ async fn main() -> Result<()> {
     let asset_pair_map = Arc::new(Mutex::new(HashMap::new()));
     let price_changes_24h = Arc::new(Mutex::new(HashMap::new()));
 
-    // Caching: Track last time we fetched asset pairs and OHLC
+    // Caching: Track last time we fetched asset pairs
     let last_asset_pairs_fetch = Arc::new(Mutex::new(
         std::time::Instant::now() - std::time::Duration::from_secs(3600),
-    ));
-    let last_ohlc_fetch = Arc::new(Mutex::new(
-        std::time::Instant::now() - std::time::Duration::from_secs(300),
     ));
 
     // Store display currency for rendering (mutable for runtime switching)
@@ -175,7 +171,6 @@ async fn main() -> Result<()> {
     let should_quit_clone = Arc::clone(&should_quit);
     let client_clone = client.clone();
     let last_asset_pairs_fetch_clone = Arc::clone(&last_asset_pairs_fetch);
-    let last_ohlc_fetch_clone = Arc::clone(&last_ohlc_fetch);
 
     // Spawn fast position update loop (every 6 seconds)
     let positions_fast_clone = Arc::clone(&positions_data);

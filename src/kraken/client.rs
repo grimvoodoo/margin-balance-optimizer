@@ -6,8 +6,7 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::models::{
-    AccountBalance, AssetPairInfo, KrakenResponse, OHLCResponse, OpenPositions, Position,
-    TickerData, TickerInfo,
+    AccountBalance, AssetPairInfo, KrakenResponse, OpenPositions, Position, TickerData, TickerInfo,
 };
 
 type HmacSha512 = Hmac<Sha512>;

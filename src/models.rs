@@ -92,11 +92,6 @@ pub struct AssetPair {
     pub quote: String,
 }
 
-// OHLC response - using Value for flexible parsing
-pub type OHLCResponse = HashMap<String, serde_json::Value>;
-
-use serde_json::Value;
-
 #[derive(Debug, Clone)]
 pub struct BalanceEntry {
     pub asset: String,
