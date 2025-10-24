@@ -8,7 +8,7 @@ use ratatui::{
 };
 use std::collections::HashMap;
 
-use crate::constants::POSITION_UPDATE_INTERVAL_SECS;
+use super::POSITION_UPDATE_INTERVAL_SECS;
 use crate::models::{Position, TickerData};
 use crate::tui::render_balance;
 

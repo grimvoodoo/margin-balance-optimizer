@@ -3,11 +3,33 @@
 # Script to install git hooks for this repository
 # Run this after cloning the repository to set up pre-commit checks
 
+set -euo pipefail
+
+# Preflight checks
+command -v cargo >/dev/null 2>&1 || { echo "❌ cargo not found in PATH"; exit 1; }
+rustup component list 2>/dev/null | grep -q 'rustfmt.*installed' || { echo "❌ Install rustfmt: rustup component add rustfmt"; exit 1; }
+rustup component list 2>/dev/null | grep -q 'clippy.*installed' || { echo "❌ Install clippy: rustup component add clippy"; exit 1; }
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-HOOKS_DIR="$REPO_ROOT/.git/hooks"
+
+# Use configured hooks path if present; else default to .git/hooks
+CONFIGURED_HOOKS_DIR="$(git config --get core.hooksPath || true)"
+if [ -n "$CONFIGURED_HOOKS_DIR" ]; then
+  # If relative, resolve from repo root
+  if [[ "$CONFIGURED_HOOKS_DIR" = /* ]]; then
+    HOOKS_DIR="$CONFIGURED_HOOKS_DIR"
+  else
+    HOOKS_DIR="$REPO_ROOT/$CONFIGURED_HOOKS_DIR"
+  fi
+else
+  HOOKS_DIR="$REPO_ROOT/.git/hooks"
+fi
+
+mkdir -p "$HOOKS_DIR"
 
 echo "Installing git hooks for margin-balance-optimizer..."
+echo "Hooks directory: $HOOKS_DIR"
 echo ""
 
 # Create the pre-commit hook
@@ -17,7 +39,7 @@ cat > "$HOOKS_DIR/pre-commit" << 'EOF'
 # Pre-commit hook to run the same checks as GitHub Actions
 # This helps avoid wasting GitHub Actions minutes on preventable failures
 
-set -e
+set -euo pipefail
 
 echo "🔍 Running pre-commit checks..."
 echo ""
@@ -33,7 +55,7 @@ FAILED=0
 
 # 1. Check code formatting
 echo "📝 Checking code formatting..."
-if cargo fmt -- --check > /dev/null 2>&1; then
+if cargo fmt --all -- --check > /dev/null 2>&1; then
     echo -e "${GREEN}✓${NC} Code formatting check passed"
 else
     echo -e "${RED}✗${NC} Code formatting check failed"
@@ -44,13 +66,13 @@ echo ""
 
 # 2. Run clippy
 echo "🔎 Running clippy lints..."
-if cargo clippy -- -W clippy::all 2>&1 | grep -q "warning:\|error:"; then
+if cargo clippy --workspace --all-targets -- -D warnings > /dev/null 2>&1; then
+    echo -e "${GREEN}✓${NC} Clippy check passed"
+else
     echo -e "${RED}✗${NC} Clippy found issues"
     echo -e "${YELLOW}Fix clippy warnings before committing${NC}"
-    cargo clippy -- -W clippy::all
+    cargo clippy --workspace --all-targets -- -D warnings
     FAILED=1
-else
-    echo -e "${GREEN}✓${NC} Clippy check passed"
 fi
 echo ""
 
@@ -68,13 +90,17 @@ echo ""
 
 # 4. Run tests
 echo "🧪 Running tests..."
-if cargo test --verbose > /dev/null 2>&1; then
-    echo -e "${GREEN}✓${NC} All tests passed"
+if [ "${SKIP_TESTS:-0}" = "1" ]; then
+    echo -e "${YELLOW}↷${NC} Skipping tests (SKIP_TESTS=1)"
 else
-    echo -e "${RED}✗${NC} Tests failed"
-    echo -e "${YELLOW}Fix failing tests before committing${NC}"
-    cargo test --verbose
-    FAILED=1
+    if cargo test --workspace --verbose > /dev/null 2>&1; then
+        echo -e "${GREEN}✓${NC} All tests passed"
+    else
+        echo -e "${RED}✗${NC} Tests failed"
+        echo -e "${YELLOW}Fix failing tests before committing${NC}"
+        cargo test --workspace --verbose
+        FAILED=1
+    fi
 fi
 echo ""
 

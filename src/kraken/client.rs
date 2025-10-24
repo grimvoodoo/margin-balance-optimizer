@@ -27,10 +27,15 @@ impl KrakenClient {
             .decode(private_key_b64)
             .context("Failed to decode private key")?;
 
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .context("Failed to build HTTP client")?;
+
         Ok(Self {
             api_key,
             private_key,
-            client: reqwest::Client::new(),
+            client,
         })
     }
 
@@ -224,7 +229,12 @@ impl KrakenClient {
                 }
 
                 for (pair_name, pair_info) in &asset_pairs.pairs {
-                    if !pair_info.quote.contains(*quote_curr) {
+                    // Normalize quote currency for comparison
+                    let quote_normalized = pair_info
+                        .quote
+                        .trim_start_matches('X')
+                        .trim_start_matches('Z');
+                    if quote_normalized != *quote_curr {
                         continue;
                     }
 
@@ -260,7 +270,7 @@ impl KrakenClient {
         params.insert("pair".to_string(), pair.to_string());
         params.insert("interval".to_string(), interval.unwrap_or(1440).to_string());
 
-        let url = format!("{}/0/public/OHLC", "https://api.kraken.com");
+        let url = format!("{}/0/public/OHLC", KRAKEN_API_URL);
         let response = self.client.get(&url).query(&params).send().await?;
         let json: serde_json::Value = response.json().await?;
         Ok(json)

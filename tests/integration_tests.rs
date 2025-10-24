@@ -2,27 +2,11 @@
 // These tests use real API calls but with read-only operations
 // Set up test credentials in .env.test
 
-use std::collections::HashMap;
-
 #[cfg(test)]
 mod kraken_api_tests {
-    use super::*;
-
     // Helper to check if we should run integration tests
     fn should_run_integration_tests() -> bool {
         std::env::var("RUN_INTEGRATION_TESTS").is_ok()
-    }
-
-    // Helper to load test credentials
-    fn load_test_credentials() -> (String, String) {
-        dotenv::from_filename(".env.test").ok();
-
-        let api_key =
-            std::env::var("KRAKEN_API_KEY").expect("KRAKEN_API_KEY not found in .env.test");
-        let private_key =
-            std::env::var("KRAKEN_PRIVATE_KEY").expect("KRAKEN_PRIVATE_KEY not found in .env.test");
-
-        (api_key, private_key)
     }
 
     #[tokio::test]
@@ -74,7 +58,7 @@ mod kraken_api_tests {
         assert!(json["error"].as_array().unwrap().is_empty());
 
         let pairs = json["result"].as_object().unwrap();
-        assert!(pairs.len() > 0, "Should return trading pairs");
+        assert!(!pairs.is_empty(), "Should return trading pairs");
 
         println!("✅ Asset pairs API working correctly");
     }

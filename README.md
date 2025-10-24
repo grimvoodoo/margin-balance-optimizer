@@ -116,7 +116,7 @@ The project includes comprehensive unit tests covering:
 - Currency conversion utilities
 - Allocation percentage calculations
 
-**Test Coverage**: 25 tests (23 unit + 2 integration) covering core business logic.
+Tests cover core business logic and API integration.
 
 ```bash
 # Run all tests
@@ -176,13 +176,18 @@ The application uses Kraken's WebSocket v2 API for real-time ticker updates:
 
 ### REST API Fallback
 
-If you need to use the REST API version:
+The project provides two separate binaries for WebSocket and REST API modes:
 
 ```bash
-# Swap to REST version
-mv src/main.rs src/main_ws.rs
-mv src/main_rest_api.rs src/main.rs
-cargo build
+# Run WebSocket version (default, recommended)
+cargo run --release --bin mbo-ws
+
+# Run REST API version (fallback)
+cargo run --release --bin mbo-rest
+
+# Build both binaries
+cargo build --release
+# Binaries will be in target/release/mbo-ws and target/release/mbo-rest
 ```
 
 ## Troubleshooting

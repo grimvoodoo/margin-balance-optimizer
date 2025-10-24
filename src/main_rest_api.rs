@@ -8,10 +8,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
-use ratatui::{
-    backend::CrosstermBackend,
-    Terminal,
-};
+use ratatui::{backend::CrosstermBackend, Terminal};
 use std::collections::HashMap;
 use std::env;
 use std::io;
@@ -19,8 +16,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use kraken::KrakenClient;
+use tui::positions::RenderConfig;
 use tui::render_positions;
-
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -29,11 +26,11 @@ async fn main() -> Result<()> {
     let api_key = env::var("KRAKEN_API_KEY").context("KRAKEN_API_KEY not found in environment")?;
     let private_key =
         env::var("KRAKEN_PRIVATE_KEY").context("KRAKEN_PRIVATE_KEY not found in environment")?;
-    
+
     // Get display currency from environment (default to GBP)
     let display_currency = env::var("DISPLAY_CURRENCY").unwrap_or_else(|_| "GBP".to_string());
     let display_currency = display_currency.to_uppercase();
-    
+
     // Validate currency
     if !["GBP", "USD", "EUR"].contains(&display_currency.as_str()) {
         anyhow::bail!("DISPLAY_CURRENCY must be one of: GBP, USD, EUR");
@@ -52,20 +49,23 @@ async fn main() -> Result<()> {
     let should_quit = Arc::new(Mutex::new(false));
     let should_redraw = Arc::new(Mutex::new(true)); // Start with true to draw initially
     let show_help = Arc::new(Mutex::new(false));
-    
+
     // Shared state for positions, ticker data, balances, asset-to-pair mapping, and 24h price changes
     let positions_data = Arc::new(Mutex::new(HashMap::new()));
     let ticker_data = Arc::new(Mutex::new(HashMap::new()));
     let balance_data = Arc::new(Mutex::new(HashMap::new()));
     let asset_pair_map = Arc::new(Mutex::new(HashMap::new()));
     let price_changes_24h = Arc::new(Mutex::new(HashMap::new()));
-    
+
     // Store display currency for rendering (mutable for runtime switching)
     let display_currency_shared = Arc::new(Mutex::new(display_currency.clone()));
-    
+
     // Track loading state
     let is_loading = Arc::new(Mutex::new(true));
     let loading_stage = Arc::new(Mutex::new(String::from("Initializing...")));
+
+    // Track last update time for progress bar
+    let last_update_time = Arc::new(Mutex::new(std::time::Instant::now()));
 
     // Spawn keyboard handler task
     let selected_index_clone = Arc::clone(&selected_index);
@@ -74,7 +74,7 @@ async fn main() -> Result<()> {
     let show_help_clone = Arc::clone(&show_help);
     let display_currency_kb = Arc::clone(&display_currency_shared);
     let positions_data_clone = Arc::clone(&positions_data);
-    
+
     tokio::spawn(async move {
         loop {
             if event::poll(Duration::from_millis(100)).unwrap_or(false) {
@@ -135,22 +135,22 @@ async fn main() -> Result<()> {
     let should_redraw_anim = Arc::clone(&should_redraw);
     let is_loading_anim = Arc::clone(&is_loading);
     let should_quit_anim = Arc::clone(&should_quit);
-    
+
     tokio::spawn(async move {
         loop {
             if *should_quit_anim.lock().unwrap() {
                 break;
             }
-            
+
             // Trigger redraws during loading for spinner animation
             if *is_loading_anim.lock().unwrap() {
                 *should_redraw_anim.lock().unwrap() = true;
             }
-            
+
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
     });
-    
+
     // Spawn API polling task
     let positions_data_clone = Arc::clone(&positions_data);
     let ticker_data_clone = Arc::clone(&ticker_data);
@@ -163,11 +163,11 @@ async fn main() -> Result<()> {
     let should_redraw_clone = Arc::clone(&should_redraw);
     let should_quit_clone = Arc::clone(&should_quit);
     let client_clone = client.clone();
-    
+
     tokio::spawn(async move {
         // Initial fetch
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        
+
         loop {
             if *should_quit_clone.lock().unwrap() {
                 break;
@@ -176,21 +176,15 @@ async fn main() -> Result<()> {
             // Fetch positions
             *loading_stage_clone.lock().unwrap() = "Fetching positions...".to_string();
             *should_redraw_clone.lock().unwrap() = true;
-            match client_clone.get_open_positions().await {
-                Ok(positions) => {
-                    *positions_data_clone.lock().unwrap() = positions;
-                }
-                Err(_) => {}
+            if let Ok(positions) = client_clone.get_open_positions().await {
+                *positions_data_clone.lock().unwrap() = positions;
             }
 
             // Fetch balances
             *loading_stage_clone.lock().unwrap() = "Fetching balances...".to_string();
             *should_redraw_clone.lock().unwrap() = true;
-            match client_clone.get_balance().await {
-                Ok(balances) => {
-                    *balance_data_clone.lock().unwrap() = balances;
-                }
-                Err(_) => {}
+            if let Ok(balances) = client_clone.get_balance().await {
+                *balance_data_clone.lock().unwrap() = balances;
             }
 
             // Collect all pairs needed for ticker data (from positions and balances)
@@ -208,9 +202,15 @@ async fn main() -> Result<()> {
                 .keys()
                 .filter(|asset| {
                     // Skip fiat currencies
-                    !(asset.ends_with("GBP") || asset.as_str() == "ZGBP" || asset.as_str() == "GBP" 
-                        || asset.ends_with("EUR") || asset.as_str() == "ZEUR" || asset.as_str() == "EUR"
-                        || asset.ends_with("USD") || asset.as_str() == "ZUSD" || asset.as_str() == "USD")
+                    !(asset.ends_with("GBP")
+                        || asset.as_str() == "ZGBP"
+                        || asset.as_str() == "GBP"
+                        || asset.ends_with("EUR")
+                        || asset.as_str() == "ZEUR"
+                        || asset.as_str() == "EUR"
+                        || asset.ends_with("USD")
+                        || asset.as_str() == "ZUSD"
+                        || asset.as_str() == "USD")
                 })
                 .cloned()
                 .collect();
@@ -218,23 +218,32 @@ async fn main() -> Result<()> {
             // Debug logging - import Write once for this block
             use std::io::Write;
             if let Ok(mut file) = std::fs::File::create("/tmp/kraken_discovery_start.txt") {
-                let _ = writeln!(file, "Starting pair discovery for {} assets", balance_assets.len());
+                let _ = writeln!(
+                    file,
+                    "Starting pair discovery for {} assets",
+                    balance_assets.len()
+                );
                 for asset in &balance_assets {
                     let _ = writeln!(file, "  - {}", asset);
                 }
             }
-            
+
             // Dynamically find valid pairs for our assets (always use USD as base for consistency)
             *loading_stage_clone.lock().unwrap() = "Discovering ticker pairs...".to_string();
             *should_redraw_clone.lock().unwrap() = true;
             if !balance_assets.is_empty() {
-                match client_clone.find_pairs_for_assets(&balance_assets, "USD").await {
+                match client_clone
+                    .find_pairs_for_assets(&balance_assets, "USD")
+                    .await
+                {
                     Ok(asset_pairs) => {
                         // Store the mapping for use in rendering
                         *asset_pair_map_clone.lock().unwrap() = asset_pairs.clone();
-                        
+
                         // Debug: Log the asset-to-pair mappings
-                        if let Ok(mut file) = std::fs::File::create("/tmp/kraken_asset_mappings.txt") {
+                        if let Ok(mut file) =
+                            std::fs::File::create("/tmp/kraken_asset_mappings.txt")
+                        {
                             let _ = writeln!(file, "=== Asset to Pair Mappings ===");
                             let _ = writeln!(file, "Total mappings: {}\n", asset_pairs.len());
                             let mut sorted: Vec<_> = asset_pairs.iter().collect();
@@ -249,16 +258,16 @@ async fn main() -> Result<()> {
                                 }
                             }
                         }
-                        
+
                         for pair_name in asset_pairs.values() {
                             pairs.insert(pair_name.clone());
                         }
-                        
+
                         // Fetch conversion rates between major currencies
                         // Always fetch USD pairs since that's our calculation base
                         pairs.insert("GBPUSD".to_string());
                         pairs.insert("EURUSD".to_string());
-                        
+
                         // Also fetch cross rates for display currency conversion
                         let curr = display_currency_clone.lock().unwrap();
                         if curr.as_str() == "GBP" {
@@ -266,20 +275,26 @@ async fn main() -> Result<()> {
                         } else if curr.as_str() == "EUR" {
                             pairs.insert("USDEUR".to_string());
                         }
-                        drop(curr);  // Release lock
+                        drop(curr); // Release lock
                     }
                     Err(e) => {
-                        if let Ok(mut file) = std::fs::File::create("/tmp/kraken_pair_discovery_error.txt") {
+                        if let Ok(mut file) =
+                            std::fs::File::create("/tmp/kraken_pair_discovery_error.txt")
+                        {
                             let _ = writeln!(file, "Error discovering pairs: {:?}", e);
                         }
                     }
                 }
             }
             let pairs_vec: Vec<String> = pairs.into_iter().collect();
-            
+
             // Debug: Write requested pairs BEFORE API call
             if let Ok(mut file) = std::fs::File::create("/tmp/kraken_pairs_requested.txt") {
-                let _ = writeln!(file, "=== Pairs we're requesting ({} total) ===", pairs_vec.len());
+                let _ = writeln!(
+                    file,
+                    "=== Pairs we're requesting ({} total) ===",
+                    pairs_vec.len()
+                );
                 for (i, pair) in pairs_vec.iter().enumerate() {
                     let _ = writeln!(file, "  {}: {}", i, pair);
                 }
@@ -289,21 +304,22 @@ async fn main() -> Result<()> {
                     let _ = writeln!(file, "  {} = {}", asset, bal);
                 }
             }
-            
+
             // Fetch tickers one by one to avoid "unknown pair" errors breaking everything
-            *loading_stage_clone.lock().unwrap() = format!("Fetching {} ticker prices...", pairs_vec.len());
+            *loading_stage_clone.lock().unwrap() =
+                format!("Fetching {} ticker prices...", pairs_vec.len());
             *should_redraw_clone.lock().unwrap() = true;
             if !pairs_vec.is_empty() {
                 let mut all_tickers = HashMap::new();
                 let mut successful_pairs = Vec::new();
                 let mut failed_pairs = Vec::new();
-                
+
                 for (idx, pair) in pairs_vec.iter().enumerate() {
                     // Small delay between ticker requests too
                     if idx > 0 && idx % 10 == 0 {
                         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     }
-                    
+
                     match client_clone.get_ticker(vec![pair.clone()]).await {
                         Ok(tickers) => {
                             successful_pairs.push(pair.clone());
@@ -314,27 +330,27 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
-                
+
                 // Debug: Write results
                 if let Ok(mut file) = std::fs::File::create("/tmp/kraken_debug.txt") {
                     let _ = writeln!(file, "Pairs requested: {}", pairs_vec.len());
                     let _ = writeln!(file, "Successful: {}", successful_pairs.len());
                     let _ = writeln!(file, "Failed: {}\n", failed_pairs.len());
-                    
+
                     if !successful_pairs.is_empty() {
                         let _ = writeln!(file, "=== Successful Pairs ===");
                         for (i, pair) in successful_pairs.iter().enumerate() {
                             let _ = writeln!(file, "  {}: {}", i, pair);
                         }
                     }
-                    
+
                     if !failed_pairs.is_empty() {
                         let _ = writeln!(file, "\n=== Failed Pairs ===");
                         for (pair, error) in &failed_pairs {
                             let _ = writeln!(file, "  {}: {}", pair, error);
                         }
                     }
-                    
+
                     let _ = writeln!(file, "\n=== Received Ticker Data ===");
                     let mut received: Vec<_> = all_tickers.keys().collect();
                     received.sort();
@@ -345,23 +361,23 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
-                
+
                 *ticker_data_clone.lock().unwrap() = all_tickers;
             }
-            
+
             // Fetch 24h price changes for all pairs
             *loading_stage_clone.lock().unwrap() = "Calculating 24H changes...".to_string();
             *should_redraw_clone.lock().unwrap() = true;
             let mut changes_24h = HashMap::new();
             let mut ohlc_debug = Vec::new();
-            
+
             for (idx, pair) in pairs_vec.iter().enumerate() {
                 // Add delay between requests to avoid rate limiting
                 // Kraken public API limit is ~1 call per second burst, so space them out
                 if idx > 0 {
                     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                 }
-                
+
                 match client_clone.get_ohlc(pair, Some(1440)).await {
                     Ok(json) => {
                         // Parse the JSON response: {"error":[], "result":{"PAIRNAME":[[...],[...]], "last":timestamp}}
@@ -371,21 +387,46 @@ async fn main() -> Result<()> {
                                 for (key, value) in obj {
                                     if key != "last" {
                                         if let Some(candles) = value.as_array() {
-                                            ohlc_debug.push(format!("  {}: {} candles", pair, candles.len()));
-                                            
+                                            ohlc_debug.push(format!(
+                                                "  {}: {} candles",
+                                                pair,
+                                                candles.len()
+                                            ));
+
                                             if candles.len() >= 2 {
                                                 // Each candle is [time, open, high, low, close, vwap, volume, count]
                                                 let yesterday = &candles[candles.len() - 2];
                                                 let today = &candles[candles.len() - 1];
-                                                
-                                                if let (Some(prev_arr), Some(curr_arr)) = (yesterday.as_array(), today.as_array()) {
+
+                                                if let (Some(prev_arr), Some(curr_arr)) =
+                                                    (yesterday.as_array(), today.as_array())
+                                                {
                                                     // Index 4 is the close price
-                                                    if let (Some(prev_close_str), Some(curr_close_str)) = (prev_arr.get(4), curr_arr.get(4)) {
-                                                        if let (Some(prev_str), Some(curr_str)) = (prev_close_str.as_str(), curr_close_str.as_str()) {
-                                                            if let (Ok(prev_close), Ok(curr_close)) = (prev_str.parse::<f64>(), curr_str.parse::<f64>()) {
+                                                    if let (
+                                                        Some(prev_close_str),
+                                                        Some(curr_close_str),
+                                                    ) = (prev_arr.get(4), curr_arr.get(4))
+                                                    {
+                                                        if let (Some(prev_str), Some(curr_str)) = (
+                                                            prev_close_str.as_str(),
+                                                            curr_close_str.as_str(),
+                                                        ) {
+                                                            if let (
+                                                                Ok(prev_close),
+                                                                Ok(curr_close),
+                                                            ) = (
+                                                                prev_str.parse::<f64>(),
+                                                                curr_str.parse::<f64>(),
+                                                            ) {
                                                                 if prev_close > 0.0 {
-                                                                    let change_pct = ((curr_close - prev_close) / prev_close) * 100.0;
-                                                                    changes_24h.insert(pair.clone(), change_pct);
+                                                                    let change_pct = ((curr_close
+                                                                        - prev_close)
+                                                                        / prev_close)
+                                                                        * 100.0;
+                                                                    changes_24h.insert(
+                                                                        pair.clone(),
+                                                                        change_pct,
+                                                                    );
                                                                     ohlc_debug.push(format!("    Change: {:.2}% (prev: {:.2}, curr: {:.2})", change_pct, prev_close, curr_close));
                                                                 }
                                                             }
@@ -405,12 +446,16 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-            
+
             // Debug: Write OHLC fetch results
             if let Ok(mut file) = std::fs::File::create("/tmp/kraken_ohlc_debug.txt") {
                 let _ = writeln!(file, "=== OHLC Data Fetch Results ===");
                 let _ = writeln!(file, "Total pairs attempted: {}", pairs_vec.len());
-                let _ = writeln!(file, "Successful changes calculated: {}\n", changes_24h.len());
+                let _ = writeln!(
+                    file,
+                    "Successful changes calculated: {}\n",
+                    changes_24h.len()
+                );
                 for line in &ohlc_debug {
                     let _ = writeln!(file, "{}", line);
                 }
@@ -421,9 +466,9 @@ async fn main() -> Result<()> {
                     let _ = writeln!(file, "  {}: {:+.2}%", pair, change);
                 }
             }
-            
+
             *price_changes_24h_clone.lock().unwrap() = changes_24h;
-            
+
             // Mark as loaded after first successful fetch
             *is_loading_clone.lock().unwrap() = false;
 
@@ -453,8 +498,23 @@ async fn main() -> Result<()> {
                 let help_visible = *show_help.lock().unwrap();
                 let loading = *is_loading.lock().unwrap();
                 let load_msg = loading_stage.lock().unwrap().clone();
-                
-                render_positions(&mut terminal, &positions, &tickers, &balances, &pair_map, &changes_24h, &display_curr, help_visible, loading, &load_msg, current_index)?;
+                let last_update = last_update_time.lock().unwrap().elapsed().as_secs_f64();
+
+                let config = RenderConfig {
+                    positions: &positions,
+                    ticker_data: &tickers,
+                    balances: &balances,
+                    asset_pair_map: &pair_map,
+                    price_changes_24h: &changes_24h,
+                    display_currency: &display_curr,
+                    show_help: help_visible,
+                    is_loading: loading,
+                    loading_message: &load_msg,
+                    selected_index: current_index,
+                    seconds_since_update: last_update,
+                };
+
+                render_positions(&mut terminal, &config)?;
                 *should_redraw.lock().unwrap() = false;
             }
 

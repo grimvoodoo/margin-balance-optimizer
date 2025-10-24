@@ -1,4 +1,3 @@
-mod constants;
 mod kraken;
 mod models;
 mod tui;
@@ -16,9 +15,9 @@ use std::io;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use constants::POSITION_UPDATE_INTERVAL_SECS;
 use kraken::KrakenClient;
-use tui::{render_positions, RenderConfig};
+use tui::positions::RenderConfig;
+use tui::{render_positions, POSITION_UPDATE_INTERVAL_SECS};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -148,15 +147,15 @@ async fn main() -> Result<()> {
                 break;
             }
 
-            // Trigger redraws during loading for spinner animation
+            // Only trigger redraws during loading for spinner animation
+            // Progress bar will be updated by API polling task
             if *is_loading_anim.lock().unwrap() {
                 *should_redraw_anim.lock().unwrap() = true;
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             } else {
-                // Always trigger redraw for progress bar animation
-                *should_redraw_anim.lock().unwrap() = true;
+                // Slower refresh rate when not loading to reduce CPU usage
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             }
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
     });
 
@@ -503,7 +502,7 @@ async fn main() -> Result<()> {
                 *should_redraw.lock().unwrap() = false;
             }
 
-            tokio::time::sleep(tokio::time::Duration::from_millis(16)).await; // ~60fps
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await; // ~20fps, sufficient for financial data
         }
         Ok::<(), anyhow::Error>(())
     }

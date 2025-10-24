@@ -6,10 +6,24 @@ This directory contains helpful scripts for development and maintenance.
 
 Installs git pre-commit hooks that run the same checks as the GitHub Actions CI pipeline.
 
+### Prerequisites
+
+Ensure you have the required Rust components installed:
+
+```bash
+rustup component add rustfmt clippy
+```
+
 ### Usage
 
 ```bash
 ./scripts/install-hooks.sh
+```
+
+**Note**: If you have `core.hooksPath` configured, the script will respect that setting. Otherwise, hooks will be installed to `.git/hooks`. To check your hooks path:
+
+```bash
+git config --get core.hooksPath
 ```
 
 ### What it does

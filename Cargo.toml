@@ -3,6 +3,14 @@ name = "margin-balance-optimizer"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "mbo-ws"
+path = "src/main.rs"
+
+[[bin]]
+name = "mbo-rest"
+path = "src/main_rest_api.rs"
+
 [dependencies]
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
