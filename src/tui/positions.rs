@@ -23,6 +23,7 @@ pub fn render_positions<B: Backend>(
     is_loading: bool,
     loading_message: &str,
     selected_index: usize,
+    seconds_since_update: f64,
 ) -> Result<()> {
     terminal.draw(|f| {
         let size = f.area();
@@ -42,7 +43,9 @@ pub fn render_positions<B: Backend>(
         sorted_positions.sort_by(|a, b| {
             let upnl_a = a.1.calculate_unrealized_pnl();
             let upnl_b = b.1.calculate_unrealized_pnl();
-            upnl_b.partial_cmp(&upnl_a).unwrap_or(std::cmp::Ordering::Equal)
+            upnl_b
+                .partial_cmp(&upnl_a)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         let rows: Vec<Row> = sorted_positions
@@ -64,9 +67,23 @@ pub fn render_positions<B: Backend>(
 
                 let upnl = position.calculate_unrealized_pnl();
 
-                let side_text = if side.to_lowercase() == "buy" { "Long" } else { "Short" };
-                let side_color = if side.to_lowercase() == "buy" { Color::Green } else { Color::Red };
-                let upnl_color = if upnl > 0.0 { Color::Green } else if upnl < 0.0 { Color::Red } else { Color::White };
+                let side_text = if side.to_lowercase() == "buy" {
+                    "Long"
+                } else {
+                    "Short"
+                };
+                let side_color = if side.to_lowercase() == "buy" {
+                    Color::Green
+                } else {
+                    Color::Red
+                };
+                let upnl_color = if upnl > 0.0 {
+                    Color::Green
+                } else if upnl < 0.0 {
+                    Color::Red
+                } else {
+                    Color::White
+                };
 
                 let is_selected = index == selected_index;
 
@@ -81,7 +98,12 @@ pub fn render_positions<B: Backend>(
                         Cell::from(format!("{:.2}", margin)),
                         Cell::from(format!("{:+.2}", upnl)),
                     ])
-                    .style(Style::default().bg(Color::White).fg(Color::Black).add_modifier(Modifier::BOLD))
+                    .style(
+                        Style::default()
+                            .bg(Color::White)
+                            .fg(Color::Black)
+                            .add_modifier(Modifier::BOLD),
+                    )
                 } else {
                     // Non-selected row: colored cells
                     Row::new(vec![
@@ -91,7 +113,8 @@ pub fn render_positions<B: Backend>(
                         Cell::from(format!("{:.2}", open_price)),
                         Cell::from(format!("{:.2}", current_price)),
                         Cell::from(format!("{:.2}", margin)),
-                        Cell::from(format!("{:+.2}", upnl)).style(Style::default().fg(upnl_color).add_modifier(Modifier::BOLD)),
+                        Cell::from(format!("{:+.2}", upnl))
+                            .style(Style::default().fg(upnl_color).add_modifier(Modifier::BOLD)),
                     ])
                 }
             })
@@ -109,9 +132,17 @@ pub fn render_positions<B: Backend>(
 
         let table = Table::new(rows, widths)
             .header(
-                Row::new(vec!["PAIR", "SIDE", "OPEN QTY", "OPEN PRICE", "CURRENT", "MARGIN", "UP&L"])
-                    .style(Style::default().add_modifier(Modifier::BOLD))
-                    .bottom_margin(1),
+                Row::new(vec![
+                    "PAIR",
+                    "SIDE",
+                    "OPEN QTY",
+                    "OPEN PRICE",
+                    "CURRENT",
+                    "MARGIN",
+                    "UP&L",
+                ])
+                .style(Style::default().add_modifier(Modifier::BOLD))
+                .bottom_margin(1),
             )
             .block(
                 Block::default()
@@ -119,45 +150,98 @@ pub fn render_positions<B: Backend>(
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::Cyan)),
             )
-            .highlight_style(Style::default().bg(Color::White).fg(Color::Black).add_modifier(Modifier::BOLD));
+            .highlight_style(
+                Style::default()
+                    .bg(Color::White)
+                    .fg(Color::Black)
+                    .add_modifier(Modifier::BOLD),
+            );
 
         f.render_widget(table, chunks[0]);
 
         // Render balance table
-        render_balance(f, chunks[1], balances, ticker_data, asset_pair_map, price_changes_24h, display_currency);
-        
-        // Render status bar
-        let status_text = format!(" [H]elp  [C] Balance Currency: {}  [Q]uit ", display_currency);
+        render_balance(
+            f,
+            chunks[1],
+            balances,
+            ticker_data,
+            asset_pair_map,
+            price_changes_24h,
+            display_currency,
+        );
+
+        // Render status bar with subtle progress indicator
+        let update_interval = 6.0; // 6 seconds between updates
+        let progress = (seconds_since_update / update_interval).min(1.0);
+        let bar_width = (size.width as f64 * progress) as u16;
+
+        // Create two chunks: one for progress bar, one for status text
+        let status_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // Progress bar
+                Constraint::Length(2), // Status text
+            ])
+            .split(chunks[2]);
+
+        // Render subtle progress bar with dotted style
+        let progress_char = "▪";
+        let empty_char = "·";
+        let total_chars = size.width as usize;
+        let filled_chars = (total_chars as f64 * progress) as usize;
+
+        let mut progress_text = String::new();
+        for i in 0..total_chars {
+            if i < filled_chars {
+                progress_text.push_str(progress_char);
+            } else {
+                progress_text.push_str(empty_char);
+            }
+        }
+
+        // Keep color calm and reassuring - subtle cyan that matches the theme
+        let progress_bar = Paragraph::new(progress_text)
+            .style(Style::default().fg(Color::DarkGray))
+            .block(Block::default().borders(Borders::NONE));
+        f.render_widget(progress_bar, status_chunks[0]);
+
+        // Render status text
+        let status_text = format!(
+            " [H]elp  [C] Balance Currency: {}  [Q]uit ",
+            display_currency
+        );
         let status_bar = Paragraph::new(status_text)
             .style(Style::default().bg(Color::DarkGray).fg(Color::White))
             .block(Block::default().borders(Borders::NONE));
-        f.render_widget(status_bar, chunks[2]);
-        
+        f.render_widget(status_bar, status_chunks[1]);
+
         // Render loading overlay if still loading
         if is_loading {
             let loading_block = Block::default()
                 .title(" Loading ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Yellow));
-            
+
             // Simple spinner animation based on time
             let spinner_frames = vec!["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
             let frame_idx = (std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_millis() / 100) as usize % spinner_frames.len();
+                .as_millis()
+                / 100) as usize
+                % spinner_frames.len();
             let spinner = spinner_frames[frame_idx];
-            
+
             let loading_text = format!(
                 "\n\n    {}  {}\n\n    Please wait...",
                 spinner, loading_message
             );
-            
+
             let loading_paragraph = Paragraph::new(loading_text)
                 .block(loading_block)
                 .style(Style::default().fg(Color::White))
                 .alignment(Alignment::Left);
-            
+
             let area = centered_rect(50, 30, size);
             f.render_widget(Clear, area);
             f.render_widget(loading_paragraph, area);
@@ -168,7 +252,7 @@ pub fn render_positions<B: Backend>(
                 .title(" Help ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan));
-            
+
             let help_text = vec![
                 "Keyboard Shortcuts:",
                 "",
@@ -185,13 +269,13 @@ pub fn render_positions<B: Backend>(
                 "",
                 "Press ESC or H to close",
             ];
-            
+
             let help_content = help_text.join("\n");
             let help_paragraph = Paragraph::new(help_content)
                 .block(help_block)
                 .style(Style::default().fg(Color::White))
                 .alignment(Alignment::Left);
-            
+
             // Center the help modal
             let area = centered_rect(60, 50, size);
             f.render_widget(Clear, area); // Clear background
@@ -203,7 +287,11 @@ pub fn render_positions<B: Backend>(
 }
 
 /// Helper function to create a centered rectangle
-fn centered_rect(percent_x: u16, percent_y: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
+fn centered_rect(
+    percent_x: u16,
+    percent_y: u16,
+    r: ratatui::layout::Rect,
+) -> ratatui::layout::Rect {
     let popup_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([

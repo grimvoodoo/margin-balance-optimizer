@@ -15,7 +15,7 @@ pub struct TickerUpdate {
     pub price: f64,
     pub volume: f64,
     pub change_24h: f64,
-    pub timestamp: u64,  // Unix timestamp in milliseconds
+    pub timestamp: u64, // Unix timestamp in milliseconds
 }
 
 #[derive(Debug, Serialize)]
@@ -73,24 +73,33 @@ impl KrakenWebSocket {
         if let Ok(mut file) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open("/tmp/kraken_ws_connection.txt") {
-            let _ = writeln!(file, "\n[{}] Attempting to connect to {} with {} pairs", 
+            .open("/tmp/kraken_ws_connection.txt")
+        {
+            let _ = writeln!(
+                file,
+                "\n[{}] Attempting to connect to {} with {} pairs",
                 chrono::Utc::now().format("%H:%M:%S%.3f"),
-                KRAKEN_WS_URL, pairs.len());
+                KRAKEN_WS_URL,
+                pairs.len()
+            );
             let _ = writeln!(file, "Pairs: {:?}", pairs);
         }
-        
+
         let (ws_stream, _) = connect_async(KRAKEN_WS_URL)
             .await
             .context("Failed to connect to Kraken WebSocket")?;
-        
+
         // Debug: Log successful connection
         if let Ok(mut file) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open("/tmp/kraken_ws_connection.txt") {
-            let _ = writeln!(file, "[{}] ✓ Connected successfully!", 
-                chrono::Utc::now().format("%H:%M:%S%.3f"));
+            .open("/tmp/kraken_ws_connection.txt")
+        {
+            let _ = writeln!(
+                file,
+                "[{}] ✓ Connected successfully!",
+                chrono::Utc::now().format("%H:%M:%S%.3f")
+            );
         }
 
         let (mut write, mut read) = ws_stream.split();
@@ -110,7 +119,7 @@ impl KrakenWebSocket {
 
         // Spawn task to handle incoming messages
         let ticker_data = Arc::clone(&self.ticker_data);
-        
+
         tokio::spawn(async move {
             while let Some(msg_result) = read.next().await {
                 match msg_result {
@@ -120,22 +129,27 @@ impl KrakenWebSocket {
                         if let Ok(mut file) = std::fs::OpenOptions::new()
                             .create(true)
                             .append(true)
-                            .open("/tmp/kraken_ws_messages.txt") {
-                            let _ = writeln!(file, "[{}] Received: {}", 
+                            .open("/tmp/kraken_ws_messages.txt")
+                        {
+                            let _ = writeln!(
+                                file,
+                                "[{}] Received: {}",
                                 chrono::Utc::now().format("%H:%M:%S%.3f"),
-                                &text[..text.len().min(200)]);
+                                &text[..text.len().min(200)]
+                            );
                         }
-                        
+
                         if let Ok(response) = serde_json::from_str::<WsResponse>(&text) {
                             if response.channel == "ticker" && !response.data.is_empty() {
                                 let mut data = ticker_data.lock().await;
-                                
+
                                 for ticker in response.data {
                                     let timestamp = SystemTime::now()
                                         .duration_since(UNIX_EPOCH)
                                         .unwrap()
-                                        .as_millis() as u64;
-                                    
+                                        .as_millis()
+                                        as u64;
+
                                     let update = TickerUpdate {
                                         pair: ticker.symbol.clone(),
                                         price: ticker.last,
@@ -144,25 +158,35 @@ impl KrakenWebSocket {
                                         timestamp,
                                     };
                                     data.insert(ticker.symbol.clone(), update.clone());
-                                    
+
                                     // Debug: Log ticker updates
                                     if let Ok(mut file) = std::fs::OpenOptions::new()
                                         .create(true)
                                         .append(true)
-                                        .open("/tmp/kraken_ws_tickers.txt") {
-                                        let _ = writeln!(file, "[{}] {} = {} (change: {:.2}%)", 
+                                        .open("/tmp/kraken_ws_tickers.txt")
+                                    {
+                                        let _ = writeln!(
+                                            file,
+                                            "[{}] {} = {} (change: {:.2}%)",
                                             chrono::Utc::now().format("%H:%M:%S%.3f"),
-                                            ticker.symbol, ticker.last, ticker.change_pct);
+                                            ticker.symbol,
+                                            ticker.last,
+                                            ticker.change_pct
+                                        );
                                     }
                                 }
                             }
                         } else if let Ok(mut file) = std::fs::OpenOptions::new()
                             .create(true)
                             .append(true)
-                            .open("/tmp/kraken_ws_parse_errors.txt") {
-                            let _ = writeln!(file, "[{}] Failed to parse: {}", 
+                            .open("/tmp/kraken_ws_parse_errors.txt")
+                        {
+                            let _ = writeln!(
+                                file,
+                                "[{}] Failed to parse: {}",
                                 chrono::Utc::now().format("%H:%M:%S%.3f"),
-                                &text[..text.len().min(500)]);
+                                &text[..text.len().min(500)]
+                            );
                         }
                     }
                     Ok(Message::Ping(payload)) => {
@@ -187,9 +211,11 @@ impl KrakenWebSocket {
     pub async fn get_ticker_data(&self) -> HashMap<String, TickerUpdate> {
         self.ticker_data.lock().await.clone()
     }
-    
+
     pub async fn get_last_update_time(&self) -> Option<u64> {
-        self.ticker_data.lock().await
+        self.ticker_data
+            .lock()
+            .await
             .values()
             .map(|t| t.timestamp)
             .max()
@@ -220,25 +246,25 @@ impl WebSocketManager {
     pub async fn connect_with_pairs(&self, pairs: Vec<String>) -> Result<()> {
         let ws = KrakenWebSocket::new();
         ws.connect_and_subscribe(pairs.clone()).await?;
-        
+
         *self.ws.lock().await = Some(ws);
         *self.current_pairs.lock().await = pairs;
-        
+
         Ok(())
     }
 
     pub async fn update_subscriptions(&self, new_pairs: Vec<String>) -> Result<()> {
         let current = self.current_pairs.lock().await.clone();
-        
+
         // Only reconnect if pairs have changed
         if current != new_pairs {
             let ws = KrakenWebSocket::new();
             ws.connect_and_subscribe(new_pairs.clone()).await?;
-            
+
             *self.ws.lock().await = Some(ws);
             *self.current_pairs.lock().await = new_pairs;
         }
-        
+
         Ok(())
     }
 
@@ -249,7 +275,7 @@ impl WebSocketManager {
             HashMap::new()
         }
     }
-    
+
     pub async fn get_last_update_time(&self) -> Option<u64> {
         if let Some(ws) = self.ws.lock().await.as_ref() {
             ws.get_last_update_time().await
