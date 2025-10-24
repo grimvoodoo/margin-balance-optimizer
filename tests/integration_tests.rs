@@ -34,8 +34,6 @@ mod kraken_api_tests {
         }
 
         // This test only reads public data - completely safe
-        let (api_key, private_key) = load_test_credentials();
-
         // Note: We're using the production API, not futures
         // Public endpoints work without authentication
         let client = reqwest::Client::new();
