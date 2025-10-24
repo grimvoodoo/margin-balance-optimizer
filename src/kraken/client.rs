@@ -90,8 +90,8 @@ impl KrakenClient {
         all_params.extend(params.iter().map(|(k, v)| (k.clone(), v.clone())));
         all_params.insert("nonce".to_string(), nonce.clone());
 
-        let postdata =
-            serde_urlencoded::to_string(&all_params).expect("Failed to form-encode params");
+        let postdata = serde_urlencoded::to_string(&all_params)
+            .context("Failed to form-encode request parameters")?;
 
         let urlpath = format!("/0/private/{}", endpoint);
         let signature = self.sign_request(&urlpath, &nonce, &postdata);
