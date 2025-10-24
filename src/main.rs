@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use kraken::KrakenClient;
-use tui::render_positions;
+use tui::{render_positions, RenderConfig};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -674,20 +674,21 @@ async fn main() -> Result<()> {
                 let load_msg = loading_stage.lock().unwrap().clone();
                 let last_update = last_update_time.lock().unwrap().elapsed().as_secs_f64();
 
-                render_positions(
-                    &mut terminal,
-                    &positions,
-                    &tickers,
-                    &balances,
-                    &pair_map,
-                    &changes_24h,
-                    &display_curr,
-                    help_visible,
-                    loading,
-                    &load_msg,
-                    current_index,
-                    last_update,
-                )?;
+                let config = RenderConfig {
+                    positions: &positions,
+                    ticker_data: &tickers,
+                    balances: &balances,
+                    asset_pair_map: &pair_map,
+                    price_changes_24h: &changes_24h,
+                    display_currency: &display_curr,
+                    show_help: help_visible,
+                    is_loading: loading,
+                    loading_message: &load_msg,
+                    selected_index: current_index,
+                    seconds_since_update: last_update,
+                };
+
+                render_positions(&mut terminal, &config)?;
                 *should_redraw.lock().unwrap() = false;
             }
 

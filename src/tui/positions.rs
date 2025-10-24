@@ -11,20 +11,24 @@ use std::collections::HashMap;
 use crate::models::{Position, TickerData};
 use crate::tui::render_balance;
 
-#[allow(clippy::too_many_arguments)]
+/// Configuration for rendering the positions UI
+pub struct RenderConfig<'a> {
+    pub positions: &'a HashMap<String, Position>,
+    pub ticker_data: &'a HashMap<String, TickerData>,
+    pub balances: &'a HashMap<String, String>,
+    pub asset_pair_map: &'a HashMap<String, String>,
+    pub price_changes_24h: &'a HashMap<String, f64>,
+    pub display_currency: &'a str,
+    pub show_help: bool,
+    pub is_loading: bool,
+    pub loading_message: &'a str,
+    pub selected_index: usize,
+    pub seconds_since_update: f64,
+}
+
 pub fn render_positions<B: Backend>(
     terminal: &mut Terminal<B>,
-    positions: &HashMap<String, Position>,
-    ticker_data: &HashMap<String, TickerData>,
-    balances: &HashMap<String, String>,
-    asset_pair_map: &HashMap<String, String>,
-    price_changes_24h: &HashMap<String, f64>,
-    display_currency: &str,
-    show_help: bool,
-    is_loading: bool,
-    loading_message: &str,
-    selected_index: usize,
-    seconds_since_update: f64,
+    config: &RenderConfig,
 ) -> Result<()> {
     terminal.draw(|f| {
         let size = f.area();
@@ -40,7 +44,7 @@ pub fn render_positions<B: Backend>(
             .split(size);
 
         // Sort positions by UP&L (highest to lowest)
-        let mut sorted_positions: Vec<_> = positions.iter().collect();
+        let mut sorted_positions: Vec<_> = config.positions.iter().collect();
         sorted_positions.sort_by(|a, b| {
             let upnl_a = a.1.calculate_unrealized_pnl();
             let upnl_b = b.1.calculate_unrealized_pnl();
@@ -60,7 +64,8 @@ pub fn render_positions<B: Backend>(
                 let margin: f64 = position.margin.parse().unwrap_or(0.0);
                 let open_price = if volume != 0.0 { cost / volume } else { 0.0 };
 
-                let current_price = ticker_data
+                let current_price = config
+                    .ticker_data
                     .get(pair)
                     .and_then(|t| t.c.first())
                     .and_then(|p| p.parse::<f64>().ok())
@@ -86,7 +91,7 @@ pub fn render_positions<B: Backend>(
                     Color::White
                 };
 
-                let is_selected = index == selected_index;
+                let is_selected = index == config.selected_index;
 
                 if is_selected {
                     // Selected row: white background, black text
@@ -164,16 +169,16 @@ pub fn render_positions<B: Backend>(
         render_balance(
             f,
             chunks[1],
-            balances,
-            ticker_data,
-            asset_pair_map,
-            price_changes_24h,
-            display_currency,
+            config.balances,
+            config.ticker_data,
+            config.asset_pair_map,
+            config.price_changes_24h,
+            config.display_currency,
         );
 
         // Render status bar with subtle progress indicator
         let update_interval = 6.0; // 6 seconds between updates
-        let progress = (seconds_since_update / update_interval).min(1.0);
+        let progress = (config.seconds_since_update / update_interval).min(1.0);
 
         // Create two chunks: one for progress bar, one for status text
         let status_chunks = Layout::default()
@@ -208,7 +213,7 @@ pub fn render_positions<B: Backend>(
         // Render status text
         let status_text = format!(
             " [H]elp  [C] Balance Currency: {}  [Q]uit ",
-            display_currency
+            config.display_currency
         );
         let status_bar = Paragraph::new(status_text)
             .style(Style::default().bg(Color::DarkGray).fg(Color::White))
@@ -216,7 +221,7 @@ pub fn render_positions<B: Backend>(
         f.render_widget(status_bar, status_chunks[1]);
 
         // Render loading overlay if still loading
-        if is_loading {
+        if config.is_loading {
             let loading_block = Block::default()
                 .title(" Loading ")
                 .borders(Borders::ALL)
@@ -234,7 +239,7 @@ pub fn render_positions<B: Backend>(
 
             let loading_text = format!(
                 "\n\n    {}  {}\n\n    Please wait...",
-                spinner, loading_message
+                spinner, config.loading_message
             );
 
             let loading_paragraph = Paragraph::new(loading_text)
@@ -247,7 +252,7 @@ pub fn render_positions<B: Backend>(
             f.render_widget(loading_paragraph, area);
         }
         // Render help modal if requested
-        else if show_help {
+        else if config.show_help {
             let help_block = Block::default()
                 .title(" Help ")
                 .borders(Borders::ALL)
