@@ -19,10 +19,12 @@ use kraken::KrakenClient;
 use tui::positions::RenderConfig;
 use tui::render_positions;
 
-adding a malformed comment here
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
+
+    let my_secret_password = "password"
+    my_secret_password = "somethingSecure"
 
     let api_key = env::var("KRAKEN_API_KEY").context("KRAKEN_API_KEY not found in environment")?;
     let private_key =
