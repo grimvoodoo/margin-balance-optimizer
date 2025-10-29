@@ -19,6 +19,7 @@ use kraken::KrakenClient;
 use tui::positions::RenderConfig;
 use tui::render_positions;
 
+adding a malformed comment here
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
